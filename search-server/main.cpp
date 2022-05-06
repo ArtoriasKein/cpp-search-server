@@ -9,6 +9,7 @@
 
 using namespace std;
 
+const int MILLION = 1e-6;
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
 
 string ReadLine() {
@@ -79,59 +80,28 @@ public:
             });
     }
 
-    //В задании было написано изменить функцию FindTopDocuments для того, чтобы она работала с новым функционалом, но я почему-то подумал, что изменить надо только её, поэтому оставил FindAllDocuments без изменений
-    //Позже в авторском решении я увидел, что можно было сделать проще, конечно
+    vector<Document> FindTopDocuments(const string& raw_query, DocumentStatus status) const {
+        return FindTopDocuments(raw_query, [status](int document_id, DocumentStatus doc_status, int rating) { return doc_status == status; });
+    }
+
+    vector<Document> FindTopDocuments(const string& raw_query) const {
+        return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
+    }
+
     template <typename PreFunc>
     vector<Document> FindTopDocuments(const string& raw_query, PreFunc pre_function) const {
         const Query query = ParseQuery(raw_query);
-        auto matched_documents = FindAllDocuments(query, DocumentStatus::ACTUAL);
-        auto matched_documents_IRRELEVANT = FindAllDocuments(query, DocumentStatus::IRRELEVANT);
-        auto matched_documents_BANNED = FindAllDocuments(query, DocumentStatus::BANNED);
-        auto matched_documents_REMOVED = FindAllDocuments(query, DocumentStatus::REMOVED);
-        for (const auto& document : matched_documents_IRRELEVANT) {
-            matched_documents.push_back(document);
-        }
-        for (const auto& document : matched_documents_BANNED) {
-            matched_documents.push_back(document);
-        }
-        for (const auto& document : matched_documents_REMOVED) {
-            matched_documents.push_back(document);
-        }
+        auto matched_documents = FindAllDocuments(query, pre_function);
         sort(matched_documents.begin(), matched_documents.end(),
             [](const Document& lhs, const Document& rhs) {
-                if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+                if (abs(lhs.relevance - rhs.relevance) < MILLION) {
                     return lhs.rating > rhs.rating;
                 }
                 else {
                     return lhs.relevance > rhs.relevance;
                 }
             });
-        vector<Document> result;
-        for (const auto& document : matched_documents) {
-            if (pre_function(document.id, documents_.at(document.id).status, document.rating)) {
-                result.push_back(document);
-            }
-        }
 
-        if (result.size() > MAX_RESULT_DOCUMENT_COUNT) {
-            result.resize(MAX_RESULT_DOCUMENT_COUNT);
-        }
-        return result;
-    }
-
-    vector<Document> FindTopDocuments(const string& raw_query, DocumentStatus status = DocumentStatus::ACTUAL) const {
-        const Query query = ParseQuery(raw_query);
-        auto matched_documents = FindAllDocuments(query, status);
-
-        sort(matched_documents.begin(), matched_documents.end(),
-            [](const Document& lhs, const Document& rhs) {
-                if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
-                    return lhs.rating > rhs.rating;
-                }
-                else {
-                    return lhs.relevance > rhs.relevance;
-                }
-            });
         if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
             matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
         }
@@ -246,16 +216,17 @@ private:
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
     }
 
-    vector<Document> FindAllDocuments(const Query& query, DocumentStatus status) const {
+    template <typename PreFunc>
+    vector<Document> FindAllDocuments(const Query& query, PreFunc pre_function) const {
         map<int, double> document_to_relevance;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
                 continue;
             }
-            const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
+            const double idf = ComputeWordInverseDocumentFreq(word);
             for (const auto [document_id, term_freq] : word_to_document_freqs_.at(word)) {
-                if (documents_.at(document_id).status == status) {
-                    document_to_relevance[document_id] += term_freq * inverse_document_freq;
+                if (pre_function(document_id, documents_.at(document_id).status, documents_.at(document_id).rating)) {
+                    document_to_relevance[document_id] += term_freq * idf;
                 }
             }
         }
