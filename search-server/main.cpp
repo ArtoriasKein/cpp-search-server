@@ -319,11 +319,11 @@ void TestExcludeStopWordsFromAddedDocumentContent() {
 //Тест на добавление и нахождение добавленного документа
 void TestAddDocument() {
     SearchServer server;
+    ASSERT(server.FindTopDocuments("monkey"s).empty());
     const int doc_id = 69;
     const string document = "funny monkey in the boat"s;
     const vector<int> ratings = { 1, 2, 3 };
     server.SetStopWords("in the"s);
-    ASSERT(server.FindTopDocuments("monkey"s).empty());
     server.AddDocument(doc_id, document, DocumentStatus::ACTUAL, ratings);
     ASSERT_EQUAL(static_cast<int>(server.FindTopDocuments("monkey"s).size()), 1);
     ASSERT_EQUAL_HINT(server.FindTopDocuments("monkey"s)[0].id, doc_id, "Document id from server and initialized document id must match"s);
@@ -336,7 +336,7 @@ void TestMinusWords() {
     const string document = "funny monkey in the boat"s;
     const vector<int> ratings = { 1, 2, 3 };
     server.AddDocument(doc_id, document, DocumentStatus::ACTUAL, ratings);
-    ASSERT_EQUAL(static_cast<int>(server.FindTopDocuments("monkey boat"s).size()), 1);
+    ASSERT_EQUAL(static_cast<int>(server.FindTopDocuments("monkey -cat"s).size()), 1);
     ASSERT_HINT(server.FindTopDocuments("monkey -boat"s).empty(), "Results must be empty due to minus word"s);
 }
 
@@ -348,12 +348,13 @@ void TestRelevanceSort() {
     server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
     server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
-    vector<double> result_for_test = { 0.866434, 0.173287, 0.173287 };
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
     int i = 0;
     for (const auto& result : result_from_server) {
-        ASSERT_EQUAL(round(result.relevance * 10000) / 10000, round(result_for_test[i] * 10000) / 10000);
-        ++i;
+        if (i <= 2) {
+            ASSERT(result.relevance >= result_from_server[i].relevance);
+            ++i;
+        }
     }
 }
 
@@ -418,7 +419,7 @@ void TestRelevance() {
     server.AddDocument(0, "белый кот модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
     double relevance = log((server.GetDocumentCount() * 1.0) / 1) * (1.0 / 4.0);
-    ASSERT_EQUAL(round(result_from_server[0].relevance * 10000) / 10000, round(relevance * 10000) / 10000);
+    ASSERT(abs(result_from_server[0].relevance - relevance) <= MILLION);
 }
 
 
