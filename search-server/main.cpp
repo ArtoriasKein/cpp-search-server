@@ -10,6 +10,7 @@
 using namespace std;
 
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
+const int MILLION = 1e-6;
 
 string ReadLine() {
     string s;
@@ -93,7 +94,7 @@ public:
         auto matched_documents = FindAllDocuments(query, pre_function);
         sort(matched_documents.begin(), matched_documents.end(),
             [](const Document& lhs, const Document& rhs) {
-                if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+                if (abs(lhs.relevance - rhs.relevance) < MILLION) {
                     return lhs.rating > rhs.rating;
                 }
                 else {
@@ -322,6 +323,7 @@ void TestAddDocument() {
     const string document = "funny monkey in the boat"s;
     const vector<int> ratings = { 1, 2, 3 };
     server.SetStopWords("in the"s);
+    ASSERT(server.FindTopDocuments("monkey"s).empty());
     server.AddDocument(doc_id, document, DocumentStatus::ACTUAL, ratings);
     ASSERT_EQUAL(static_cast<int>(server.FindTopDocuments("monkey"s).size()), 1);
     ASSERT_EQUAL_HINT(server.FindTopDocuments("monkey"s)[0].id, doc_id, "Document id from server and initialized document id must match"s);
@@ -333,8 +335,8 @@ void TestMinusWords() {
     const int doc_id = 69;
     const string document = "funny monkey in the boat"s;
     const vector<int> ratings = { 1, 2, 3 };
-    server.SetStopWords("in the"s);
     server.AddDocument(doc_id, document, DocumentStatus::ACTUAL, ratings);
+    ASSERT_EQUAL(static_cast<int>(server.FindTopDocuments("monkey boat"s).size()), 1);
     ASSERT_HINT(server.FindTopDocuments("monkey -boat"s).empty(), "Results must be empty due to minus word"s);
 }
 
@@ -346,12 +348,11 @@ void TestRelevanceSort() {
     server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
     server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
-    vector<Document> result_for_test = { {1, 0.866434, 5}, {0, 0.173287, 2}, {2, 0.173287, -1} };
+    vector<double> result_for_test = { 0.866434, 0.173287, 0.173287 };
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
     int i = 0;
     for (const auto& result : result_from_server) {
-        ASSERT_EQUAL(result.id, result_for_test[i].id);
-        ASSERT_EQUAL(round(result.relevance * 10000) / 10000, round(result_for_test[i].relevance * 10000) / 10000);
+        ASSERT_EQUAL(round(result.relevance * 10000) / 10000, round(result_for_test[i] * 10000) / 10000);
         ++i;
     }
 }
@@ -366,8 +367,7 @@ void TestMatchedDocuments() {
     server.AddDocument(doc_id, document, DocumentStatus::ACTUAL, ratings);
     tuple<vector<string>, DocumentStatus> empty;
     ASSERT(server.MatchDocument("monkey -boat"s, 69) == empty);
-    vector<string> matched_words = { "boat"s, "monkey"s };
-    tuple<vector<string>, DocumentStatus> result = { matched_words, DocumentStatus::ACTUAL };
+    tuple<vector<string>, DocumentStatus> result = { { "boat"s, "monkey"s }, DocumentStatus::ACTUAL };
     tuple<vector<string>, DocumentStatus> compare = server.MatchDocument("monkey boat"s, 69);
     ASSERT(server.MatchDocument("monkey boat"s, 69) == result);
 }
@@ -376,17 +376,12 @@ void TestMatchedDocuments() {
 void TestDocumentRating() {
     SearchServer server;
     server.SetStopWords("и в на"s);
-    server.AddDocument(0, "белый кот и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
-    server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
-    server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
-    server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
-    vector<Document> result_for_test = { {1, 0.866434, 5}, {0, 0.173287, 2}, {2, 0.173287, -1} };
+    const vector<int> ratings = { 7, 2, 7 };
+    server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, ratings);
+    const int rating_for_test = (7 + 2 + 7) / 3;
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
-    int i = 0;
-    for (const auto& result : result_from_server) {
-        ASSERT_EQUAL(result.rating, result_for_test[i].rating);
-        ++i;
-    }
+    ASSERT_EQUAL(result_from_server[0].rating, rating_for_test);
+
 }
 
 //Тест на фильтрацию результатов с помощью предиката
@@ -398,11 +393,8 @@ void TestPredicate() {
     server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s, [](int document_id, DocumentStatus, int) { return document_id % 2 == 0; });
-    vector<Document> result_for_test = { {0, 0.173287, 2},{2, 0.173287, -1} };
-    int i = 0;
     for (const auto& result : result_from_server) {
-        ASSERT_EQUAL(result.id, result_for_test[i].id);
-        ++i;
+        ASSERT(result.id % 2 == 0);
     }
 }
 
@@ -414,38 +406,19 @@ void TestFindDocumentsWithStatus() {
     server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
     server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
-    vector<Document> result_for_test_ACTUAL = { {1, 0.866434, 5}, {0, 0.173287, 2}, {2, 0.173287, -1} };
-    vector<Document> result_for_test_BANNED = { {3, 0.231049, 9} };
-    vector<Document> result_ACTUAL = server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::ACTUAL);
-    vector<Document> result_BANNED = server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::BANNED);
-    int i = 0;
-    for (const auto& result : result_ACTUAL) {
-        ASSERT_EQUAL(result.id, result_for_test_ACTUAL[i].id);
-        ++i;
-    }
-    i = 0;
-    for (const auto& result : result_BANNED) {
-        ASSERT_EQUAL(result.id, result_for_test_BANNED[i].id);
-        ++i;
-    }
+    ASSERT(!server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::ACTUAL).empty());
+    ASSERT(!server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::BANNED).empty());
+    ASSERT(server.FindTopDocuments("пушистый ухоженный кот"s, DocumentStatus::IRRELEVANT).empty());
 }
 
 
 //Тест на корректное вычисление релевантности документов
 void TestRelevance() {
     SearchServer server;
-    server.SetStopWords("и в на"s);
-    server.AddDocument(0, "белый кот и модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
-    server.AddDocument(1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, { 7, 2, 7 });
-    server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
-    server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
-    vector<Document> result_for_test = { {1, 0.866434, 5}, {0, 0.173287, 2}, {2, 0.173287, -1} };
+    server.AddDocument(0, "белый кот модный ошейник"s, DocumentStatus::ACTUAL, { 8, -3 });
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
-    int i = 0;
-    for (const auto& result : result_from_server) {
-        ASSERT_EQUAL(round(result.relevance * 10000) / 10000, round(result_for_test[i].relevance * 10000) / 10000);
-        ++i;
-    }
+    double relevance = log((server.GetDocumentCount() * 1.0) / 1) * (1.0 / 4.0);
+    ASSERT_EQUAL(round(result_from_server[0].relevance * 10000) / 10000, round(relevance * 10000) / 10000);
 }
 
 
