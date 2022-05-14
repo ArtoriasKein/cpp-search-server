@@ -349,13 +349,9 @@ void TestRelevanceSort() {
     server.AddDocument(2, "ухоженный пёс выразительные глаза"s, DocumentStatus::ACTUAL, { 5, -12, 2, 1 });
     server.AddDocument(3, "ухоженный скворец евгений"s, DocumentStatus::BANNED, { 9 });
     vector<Document> result_from_server = server.FindTopDocuments("пушистый ухоженный кот"s);
-    int i = 0;
-    for (const auto& result : result_from_server) {
-        if (i <= 2) {
-            ASSERT(result.relevance >= result_from_server[i].relevance);
-            ++i;
-        }
-    }
+    ASSERT(result_from_server[0].relevance >= result_from_server[1].relevance);
+    ASSERT(result_from_server[1].relevance >= result_from_server[2].relevance);
+
 }
 
 //Тест проверяющий возвращение слов из документа, соответствующих запросу
