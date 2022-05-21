@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <numeric>
 #include <iostream>
 
 using namespace std;
@@ -85,10 +86,10 @@ public:
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
-        for (const string& stop_word : stop_words_) {
-            if (!IsValidWord(stop_word)) {
-                throw invalid_argument("Недопустимые символы в стоп-словах"s);
-            }
+        if (!all_of(stop_words_.begin(), stop_words_.end(), [](string word) {
+            return IsValidWord(word);
+            })) {
+            throw invalid_argument("Недопустимые символы в стоп-словах"s);
         }
     }
 
@@ -104,10 +105,7 @@ public:
         if (documents_.count(document_id) > 0) {
             throw invalid_argument("Попытка добавления документа с уже существующим идентификатором"s);
         }
-        vector<string> words;
-        if (!SplitIntoWordsNoStop(document, words)) {
-            throw invalid_argument("Недопустимые символы в тексте документа"s);
-        }
+        vector<string> words = SplitIntoWordsNoStop(document);
         const double inv_word_count = 1.0 / words.size();
         for (const string& word : words) {
             word_to_document_freqs_[word][document_id] += inv_word_count;
@@ -127,11 +125,10 @@ public:
         return FindTopDocuments(raw_query, DocumentStatus::ACTUAL);
     }
 
-    template <typename PreFunc>
-    vector<Document> FindTopDocuments(const string& raw_query, PreFunc pre_function) const {
-        Query query;
-        ParseQuery(raw_query, query);
-        auto matched_documents = FindAllDocuments(query, pre_function);
+    template <typename FilterFunction>
+    vector<Document> FindTopDocuments(const string& raw_query, FilterFunction filter_function) const {
+        Query query = ParseQuery(raw_query);
+        auto matched_documents = FindAllDocuments(query, filter_function);
         sort(matched_documents.begin(), matched_documents.end(),
             [](const Document& lhs, const Document& rhs) {
                 if (abs(lhs.relevance - rhs.relevance) < ACCURACY) {
@@ -160,8 +157,7 @@ public:
     }
 
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
-        Query query;
-        ParseQuery(raw_query, query);
+        Query query = ParseQuery(raw_query);
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
@@ -199,35 +195,29 @@ private:
     }
 
     static bool IsValidWord(const string& word) {
-        // A valid word must not contain special characters
         return none_of(word.begin(), word.end(), [](char c) {
             return c >= '\0' && c < ' ';
             });
     }
 
-    [[nodiscard]] bool SplitIntoWordsNoStop(const string& text, vector<string>& result) const {
-        result.clear();
+    vector<string> SplitIntoWordsNoStop(const string& text) const {
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
             if (!IsValidWord(word)) {
-                return false;
+                throw invalid_argument("Недопустимые символы в тексте документа"s);
             }
             if (!IsStopWord(word)) {
                 words.push_back(word);
             }
         }
-        result.swap(words);
-        return true;
+        return words;
     }
 
     static int ComputeAverageRating(const vector<int>& ratings) {
         if (ratings.empty()) {
             return 0;
         }
-        int rating_sum = 0;
-        for (const int rating : ratings) {
-            rating_sum += rating;
-        }
+        int rating_sum = accumulate(ratings.begin(), ratings.end(), 0);
         return rating_sum / static_cast<int>(ratings.size());
     }
 
@@ -237,11 +227,10 @@ private:
         bool is_stop;
     };
 
-    [[nodiscard]] bool ParseQueryWord(string text, QueryWord& result) const {
-        result = {};
+    QueryWord ParseQueryWord(string text) const {
 
         if (text.empty()) {
-            return false;
+            throw invalid_argument("Пустая строка"s);
         }
         bool is_minus = false;
         if (text[0] == '-') {
@@ -258,8 +247,7 @@ private:
             throw invalid_argument("Недопустимые символы в тексте запроса"s);
         }
 
-        result = QueryWord{ text, is_minus, IsStopWord(text) };
-        return true;
+        return { text, is_minus, IsStopWord(text) };
     }
 
     struct Query {
@@ -267,13 +255,10 @@ private:
         set<string> minus_words;
     };
 
-    bool ParseQuery(const string& text, Query& result) const {
-        result = {};
+    Query ParseQuery(const string& text) const {
+        Query result;
         for (const string& word : SplitIntoWords(text)) {
-            QueryWord query_word;
-            if (!ParseQueryWord(word, query_word)) {
-                return false;
-            }
+            QueryWord query_word = ParseQueryWord(word);
             if (!query_word.is_stop) {
                 if (query_word.is_minus) {
                     result.minus_words.insert(query_word.data);
@@ -283,15 +268,15 @@ private:
                 }
             }
         }
-        return true;
+        return result;
     }
 
     double ComputeWordInverseDocumentFreq(const string& word) const {
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
     }
 
-    template <typename PreFunc>
-    vector<Document> FindAllDocuments(const Query& query, PreFunc pre_function) const {
+    template <typename FilterFunction>
+    vector<Document> FindAllDocuments(const Query& query, FilterFunction filter_function) const {
         map<int, double> document_to_relevance;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
@@ -299,12 +284,11 @@ private:
             }
             const double idf = ComputeWordInverseDocumentFreq(word);
             for (const auto [document_id, term_freq] : word_to_document_freqs_.at(word)) {
-                if (pre_function(document_id, documents_.at(document_id).status, documents_.at(document_id).rating)) {
+                if (filter_function(document_id, documents_.at(document_id).status, documents_.at(document_id).rating)) {
                     document_to_relevance[document_id] += term_freq * idf;
                 }
             }
         }
-
         for (const string& word : query.minus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
                 continue;
