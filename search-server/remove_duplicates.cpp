@@ -4,29 +4,21 @@ using namespace std;
 
 void RemoveDuplicates(SearchServer& search_server) {
 	vector<int> duplicated_documents_ids;
-	int i = 0;
+	set<set<string>> all_document_words;
 	for (const int document_id : search_server) {
-		++i;
-		for (auto it = search_server.begin() + i; it < search_server.end(); ++it) {
-			if (!(count(duplicated_documents_ids.begin(), duplicated_documents_ids.end(), *it)) && !(count(duplicated_documents_ids.begin(), duplicated_documents_ids.end(), document_id))) {
-				map<string, double> result_1 = search_server.GetWordFrequencies(document_id);
-				map<string, double> result_2 = search_server.GetWordFrequencies(*it);
-				if (result_1.size() != result_2.size()) {
-					goto exit;
-				}
-				for (const auto& [word, freq] : result_1){
-					if (!(result_2.count(word))) {
-						goto exit;
-					}
-				}
-				cout << "Found duplicate document id "s << *it << endl;
-				duplicated_documents_ids.push_back(*it);
-				exit:;
-			}
-
+		set<string> words_in_document;
+		for (const auto& [word, freq] : search_server.GetWordFrequencies(document_id)) {
+			words_in_document.insert(word);
+		}
+		if (all_document_words.contains(words_in_document)) {
+			cout << "Found duplicate document id "s << document_id << endl;
+			duplicated_documents_ids.push_back(document_id);
+		}
+		else {
+			all_document_words.insert(words_in_document);
 		}
 	}
-	for (int& id : duplicated_documents_ids) {
-		search_server.RemoveDocument(id);
-	}
+		for (int& id : duplicated_documents_ids) {
+			search_server.RemoveDocument(id);
+		}
 }
