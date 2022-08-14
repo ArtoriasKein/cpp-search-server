@@ -27,8 +27,7 @@ public:
     explicit SearchServer(const std::string& stop_words_text);
 
     void AddDocument(int document_id, const std::string_view document, DocumentStatus status, const std::vector<int>& ratings);
-
-    //Здесь было много объявлений FTD потому что у меня по какой-то причине не правильно работал is_same_v
+    
     template <typename ExecutionPolicy, typename FilterFunction>
     std::vector<Document> FindTopDocuments(ExecutionPolicy& policy, const std::string_view raw_query, FilterFunction filter_function) const;
     template <typename FilterFunction>
