@@ -40,6 +40,12 @@ public:
         }
         return result;
     }
+    
+    void Erase(const Key& key) {
+        auto& bucket = buckets_[static_cast<uint64_t>(key) % buckets_.size()];
+        std::lock_guard g(bucket.mutex);
+        bucket.map.erase(key);
+    }
 
 private:
     std::vector<Bucket> buckets_;
